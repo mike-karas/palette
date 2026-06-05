@@ -56,6 +56,9 @@
           </div>
         </div>
       </div>
+      <!-- Example photos injected by app.js -->
+      <div id="examplePhotos" hidden></div>
+
     </section>
 
     <!-- ── Results state ──────────────────────────────────────────── -->
@@ -80,6 +83,13 @@
 
       <!-- 6 swatches injected here by app.js -->
       <div class="swatches-grid" id="swatchesGrid" role="list" aria-label="Color palette"></div>
+
+      <p class="palette-footnote">
+        Near-neutral colors &mdash; whites, grays, and blacks &mdash; are typically absent from generated palettes.
+        Vibrant.js uses Median-Cut Quantization to identify perceptually distinct, saturated color regions;
+        near-zero-saturation tones carry minimal chromatic information and are deprioritized in favor of hues
+        that meaningfully define the image&rsquo;s visual character.
+      </p>
 
     </section>
   </main>

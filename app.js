@@ -7,11 +7,12 @@
 
 // ─── State ────────────────────────────────────────────────────────
 const state = {
-  dominants:     null,   // [hex, hex, hex]  — top 3 from Vibrant
-  harmonies:     null,   // [hex, hex, hex]  — derived via color theory
-  harmonyLabels: null,   // ['Complementary', …]
-  locked:        new Set(), // swatch indices 0-5 that are locked
-  busy:          false,
+  dominants:      null,   // [hex, hex, hex]  — top 3 from Vibrant
+  dominantSlots:  null,   // ['Vibrant', …]   — which Vibrant slot each came from
+  harmonies:      null,   // [hex, hex, hex]  — derived via color theory
+  harmonyLabels:  null,   // ['Complementary', …]
+  locked:         new Set(), // swatch indices 0-5 that are locked
+  busy:           false,
 };
 
 // ─── DOM references ───────────────────────────────────────────────
@@ -24,6 +25,63 @@ const cameraInput    = $('cameraInput');
 const swatchesGrid   = $('swatchesGrid');
 const imagePreview   = $('imagePreview');
 const paletteNameEl  = $('paletteName');
+const examplePhotos  = $('examplePhotos');
+
+// ═══════════════════════════════════════════════════════════════════
+// UNSPLASH EXAMPLES
+// ═══════════════════════════════════════════════════════════════════
+const UNSPLASH_KEY    = 'hAfQQhHlGMO1RCZIQ3aPLQNyMkUgBkJqAmylQSgqKM8';
+const EXAMPLE_TOPICS  = ['landscape', 'city', 'botanical', 'ocean', 'architecture', 'forest'];
+
+async function fetchExamples() {
+  try {
+    const results = await Promise.all(
+      EXAMPLE_TOPICS.map(topic =>
+        fetch(`https://api.unsplash.com/photos/random?query=${topic}&orientation=landscape&client_id=${UNSPLASH_KEY}`)
+          .then(r => r.ok ? r.json() : null)
+          .catch(() => null)
+      )
+    );
+
+    const photos = results.filter(Boolean);
+    if (!photos.length) {
+      examplePhotos.hidden = true;
+      return;
+    }
+
+    examplePhotos.innerHTML = `
+      <p class="examples__heading">Or try an example</p>
+      <div class="examples__grid">
+        ${photos.map(p => `
+          <button class="example-thumb" data-url="${p.urls.regular}"
+                  aria-label="Example photo by ${p.user.name}">
+            <img src="${p.urls.small}" alt="${p.alt_description || `Photo by ${p.user.name}`}" loading="lazy">
+            <span class="example-thumb__attr">
+              Photo by <a href="${p.user.links.html}?utm_source=palette&utm_medium=referral" target="_blank" rel="noopener">${p.user.name}</a>
+              on <a href="https://unsplash.com?utm_source=palette&utm_medium=referral" target="_blank" rel="noopener">Unsplash</a>
+            </span>
+          </button>
+        `).join('')}
+      </div>`;
+
+    examplePhotos.hidden = false;
+  } catch {
+    examplePhotos.hidden = true;
+  }
+}
+
+async function handleUrl(url) {
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    imagePreview.src = url;
+    processImage(img);
+  };
+  img.onerror = () => alert('Could not load this image. Please try another.');
+  img.src = url;
+}
+
+fetchExamples();
 
 // ═══════════════════════════════════════════════════════════════════
 // COLOR EXTRACTION
@@ -41,19 +99,18 @@ const SWATCH_PRIORITY = [
 async function extractDominants(imgEl) {
   const palette = await Vibrant.from(imgEl, { colorCount: 64 }).getPalette();
 
-  const swatches = SWATCH_PRIORITY
-    .map(k => palette[k])
+  const pairs = SWATCH_PRIORITY
+    .map(k => palette[k] ? { hex: palette[k].hex, slot: k } : null)
     .filter(Boolean)
-    .slice(0, 3)
-    .map(s => s.hex);
+    .slice(0, 3);
 
   // Guard: if the image is very monochromatic, Vibrant may return < 3 swatches.
   // Fill gaps by rotating hue 120° from the last found color.
-  while (swatches.length < 3) {
-    swatches.push(rotateHue(swatches[swatches.length - 1], 120));
+  while (pairs.length < 3) {
+    pairs.push({ hex: rotateHue(pairs[pairs.length - 1].hex, 120), slot: null });
   }
 
-  return swatches;
+  return { hexes: pairs.map(p => p.hex), slots: pairs.map(p => p.slot) };
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -210,6 +267,39 @@ function generatePaletteName(dominants) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// REASON STRINGS
+// ═══════════════════════════════════════════════════════════════════
+
+const SLOT_REASONS = {
+  'Vibrant':      'the most prominent saturated color in the image',
+  'DarkVibrant':  'a dominant dark, richly saturated region',
+  'LightVibrant': 'a dominant light, vivid area',
+  'Muted':        'a prominent muted, low-saturation region',
+  'DarkMuted':    'a dominant dark, understated tone',
+  'LightMuted':   'a dominant light, subtle hue',
+};
+
+const HARMONY_REASONS = {
+  'Complementary':       '180° opposite on the color wheel — maximum contrast',
+  'Split-complementary': '150° offset — high contrast with softer tension than a complement',
+  'Triadic':             '120° step — one point of an equilateral color triangle',
+  'Analogous':           '30° adjacent hue — cohesive and harmonious',
+  'Tetradic':            '90° step — one corner of a square on the color wheel',
+  'Shaded':              'same hue darkened 1.5 stops — adds depth without a new color',
+};
+
+function dominantReason(slot) {
+  return slot
+    ? `Extracted from ${SLOT_REASONS[slot] ?? slot.toLowerCase()}`
+    : 'Synthesized by rotating hue 120° — source image was too monochromatic';
+}
+
+function harmonyReason(label, dominantIndex) {
+  const detail = HARMONY_REASONS[label] ?? label;
+  return `Derived from Dominant ${dominantIndex + 1} — ${detail}`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // SWATCH RENDERING
 // ═══════════════════════════════════════════════════════════════════
 
@@ -237,18 +327,18 @@ function colorValues(hex) {
 }
 
 function renderSwatches() {
-  const { dominants, harmonies, harmonyLabels, locked } = state;
+  const { dominants, dominantSlots, harmonies, harmonyLabels, locked } = state;
 
   const palette = [
-    { hex: dominants[0], type: 'Dominant 1', sub: null              },
-    { hex: dominants[1], type: 'Dominant 2', sub: null              },
-    { hex: dominants[2], type: 'Dominant 3', sub: null              },
-    { hex: harmonies[0], type: 'Harmony 1',  sub: harmonyLabels[0]  },
-    { hex: harmonies[1], type: 'Harmony 2',  sub: harmonyLabels[1]  },
-    { hex: harmonies[2], type: 'Harmony 3',  sub: harmonyLabels[2]  },
+    { hex: dominants[0], type: 'Dominant 1', sub: null,             reason: dominantReason(dominantSlots[0]) },
+    { hex: dominants[1], type: 'Dominant 2', sub: null,             reason: dominantReason(dominantSlots[1]) },
+    { hex: dominants[2], type: 'Dominant 3', sub: null,             reason: dominantReason(dominantSlots[2]) },
+    { hex: harmonies[0], type: 'Harmony 1',  sub: harmonyLabels[0], reason: harmonyReason(harmonyLabels[0], 0) },
+    { hex: harmonies[1], type: 'Harmony 2',  sub: harmonyLabels[1], reason: harmonyReason(harmonyLabels[1], 1) },
+    { hex: harmonies[2], type: 'Harmony 3',  sub: harmonyLabels[2], reason: harmonyReason(harmonyLabels[2], 2) },
   ];
 
-  swatchesGrid.innerHTML = palette.map(({ hex, type, sub }, i) => {
+  swatchesGrid.innerHTML = palette.map(({ hex, type, sub, reason }, i) => {
     const vals      = colorValues(hex);
     const isLocked  = locked.has(i);
     // Choose a readable overlay color (lock icon) based on swatch brightness
@@ -269,6 +359,7 @@ function renderSwatches() {
           </button>
         </div>
         <div class="swatch__info">
+          <p class="swatch__reason">${reason}</p>
           <div>
             <div class="swatch__type">${type}</div>
             ${sub ? `<div class="swatch__sublabel">${sub}</div>` : ''}
@@ -296,11 +387,14 @@ async function processImage(imgEl) {
   swatchesGrid.classList.add('is-loading');
 
   try {
-    const rawDoms = await extractDominants(imgEl);
+    const { hexes: rawDoms, slots: rawSlots } = await extractDominants(imgEl);
 
     // Respect locked dominant slots (indices 0–2)
     const dominants = rawDoms.map((c, i) =>
       state.locked.has(i) && state.dominants ? state.dominants[i] : c
+    );
+    const dominantSlots = rawSlots.map((s, i) =>
+      state.locked.has(i) && state.dominantSlots ? state.dominantSlots[i] : s
     );
 
     const { colors: rawHarmonies, labels } = assignHarmonies(dominants);
@@ -310,7 +404,7 @@ async function processImage(imgEl) {
       state.locked.has(i + 3) && state.harmonies ? state.harmonies[i] : c
     );
 
-    Object.assign(state, { dominants, harmonies, harmonyLabels: labels });
+    Object.assign(state, { dominants, dominantSlots, harmonies, harmonyLabels: labels });
 
     paletteNameEl.textContent = generatePaletteName(dominants);
     renderSwatches();
@@ -467,6 +561,12 @@ $('copyAllBtn').addEventListener('click', () => {
 });
 
 $('exportBtn').addEventListener('click', exportPng);
+
+// ── Example photos (delegated) ────────────────────────────────────
+examplePhotos.addEventListener('click', e => {
+  const btn = e.target.closest('.example-thumb');
+  if (btn && !e.target.closest('a')) handleUrl(btn.dataset.url);
+});
 
 // ── Swatch grid (delegated) ───────────────────────────────────────
 swatchesGrid.addEventListener('click', e => {
