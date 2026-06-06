@@ -11,6 +11,7 @@ const state = {
   dominantSlots:  null,   // ['Vibrant', …]   — which Vibrant slot each came from
   harmonies:      null,   // [hex, hex, hex]  — derived via color theory
   harmonyLabels:  null,   // ['Complementary', …]
+  harmonyMode:    'auto', // 'auto' | harmony label string
   locked:         new Set(), // swatch indices 0-5 that are locked
   busy:           false,
 };
@@ -26,6 +27,7 @@ const swatchesGrid   = $('swatchesGrid');
 const imagePreview   = $('imagePreview');
 const paletteNameEl  = $('paletteName');
 const examplePhotos  = $('examplePhotos');
+const harmonyTabs    = $('harmonyTabs');
 
 // ═══════════════════════════════════════════════════════════════════
 // UNSPLASH EXAMPLES
@@ -54,7 +56,8 @@ async function fetchExamples() {
       <div class="examples__grid">
         ${photos.map(p => `
           <button class="example-thumb" data-url="${p.urls.regular}"
-                  aria-label="Example photo by ${p.user.name}">
+                  data-alt="${p.alt_description || `Photo by ${p.user.name} on Unsplash`}"
+                  aria-label="Load example: ${p.alt_description || `photo by ${p.user.name}`}">
             <img src="${p.urls.small}" alt="${p.alt_description || `Photo by ${p.user.name}`}" loading="lazy">
             <span class="example-thumb__attr">
               Photo by <a href="${p.user.links.html}?utm_source=palette&utm_medium=referral" target="_blank" rel="noopener">${p.user.name}</a>
@@ -70,11 +73,12 @@ async function fetchExamples() {
   }
 }
 
-async function handleUrl(url) {
+async function handleUrl(url, altText = 'Source image from Unsplash') {
   const img = new Image();
   img.crossOrigin = 'anonymous';
   img.onload = () => {
     imagePreview.src = url;
+    imagePreview.alt = altText;
     processImage(img);
   };
   img.onerror = () => alert('Could not load this image. Please try another.');
@@ -300,6 +304,72 @@ function harmonyReason(label, dominantIndex) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// HARMONY TABS
+// ═══════════════════════════════════════════════════════════════════
+
+const TAB_OPTIONS = [
+  { label: 'Random',           value: 'random'           },
+  { label: 'Complementary',    value: 'Complementary'    },
+  { label: 'Split-comp',       value: 'Split-complementary' },
+  { label: 'Triadic',          value: 'Triadic'          },
+  { label: 'Analogous',        value: 'Analogous'        },
+  { label: 'Tetradic',         value: 'Tetradic'         },
+  { label: 'Shaded',           value: 'Shaded'           },
+];
+
+function renderHarmonyTabs() {
+  harmonyTabs.innerHTML = TAB_OPTIONS.map(({ label, value }) => `
+    <button class="harmony-tab${state.harmonyMode === value ? ' is-active' : ''}"
+            data-mode="${value}"
+            role="tab"
+            aria-selected="${state.harmonyMode === value}"
+            aria-label="${label} harmony mode">
+      ${label}
+    </button>`
+  ).join('');
+}
+
+// Re-derive harmony swatches from the current dominants using the active
+// harmonyMode, then update state and re-render. Locked harmony slots are
+// preserved. Called when the user switches tabs without uploading a new image.
+function recomputeHarmonies() {
+  if (!state.dominants) return;
+
+  let rawHarmonies, labels;
+
+  if (state.harmonyMode === 'random') {
+    const pool = [...state.dominants];
+    const picks = state.dominants.map((dom, idx) => {
+      const entry = HARMONIES[Math.floor(Math.random() * HARMONIES.length)];
+      const color = entry.fn(dom, pool);
+      pool.push(color);
+      return { color, label: entry.label };
+    });
+    rawHarmonies = picks.map(p => p.color);
+    labels       = picks.map(p => p.label);
+  } else {
+    const entry = HARMONIES.find(h => h.label === state.harmonyMode);
+    const pool  = [...state.dominants];
+    const h0    = entry.fn(state.dominants[0], pool); pool.push(h0);
+    const h1    = entry.fn(state.dominants[1], pool); pool.push(h1);
+    const h2    = entry.fn(state.dominants[2], pool);
+    rawHarmonies = [h0, h1, h2];
+    labels       = [state.harmonyMode, state.harmonyMode, state.harmonyMode];
+  }
+
+  // Respect locked harmony slots (indices 3–5)
+  const harmonies = rawHarmonies.map((c, i) =>
+    state.locked.has(i + 3) && state.harmonies ? state.harmonies[i] : c
+  );
+  const harmonyLabels = labels.map((l, i) =>
+    state.locked.has(i + 3) && state.harmonyLabels ? state.harmonyLabels[i] : l
+  );
+
+  Object.assign(state, { harmonies, harmonyLabels });
+  renderSwatches();
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // SWATCH RENDERING
 // ═══════════════════════════════════════════════════════════════════
 
@@ -354,6 +424,7 @@ function renderSwatches() {
           <button class="swatch__lock"
                   data-action="lock" data-index="${i}"
                   aria-label="${isLocked ? 'Unlock' : 'Lock'} color ${vals.hex}"
+                  aria-pressed="${isLocked}"
                   title="${isLocked ? 'Unlock' : 'Lock'}">
             ${isLocked ? ICON_LOCKED : ICON_UNLOCKED}
           </button>
@@ -397,17 +468,12 @@ async function processImage(imgEl) {
       state.locked.has(i) && state.dominantSlots ? state.dominantSlots[i] : s
     );
 
-    const { colors: rawHarmonies, labels } = assignHarmonies(dominants);
-
-    // Respect locked harmony slots (indices 3–5)
-    const harmonies = rawHarmonies.map((c, i) =>
-      state.locked.has(i + 3) && state.harmonies ? state.harmonies[i] : c
-    );
-
-    Object.assign(state, { dominants, dominantSlots, harmonies, harmonyLabels: labels });
+    // Seed state with dominants so recomputeHarmonies can run
+    Object.assign(state, { dominants, dominantSlots, harmonyMode: 'random' });
 
     paletteNameEl.textContent = generatePaletteName(dominants);
-    renderSwatches();
+    renderHarmonyTabs();
+    recomputeHarmonies(); // picks random harmonies and calls renderSwatches
 
     // Transition in results, hide upload zone
     uploadSection.hidden = true;
@@ -440,7 +506,8 @@ function handleFile(file) {
     // naturalWidth/naturalHeight to read as 0 inside the hidden results section.
     const img = new Image();
     img.onload = () => {
-      imagePreview.src = result; // set the visible preview separately
+      imagePreview.src = result;
+      imagePreview.alt = `Source image: ${file.name}`;
       processImage(img);
     };
     img.onerror = () => alert('Could not load this image. Please try another.');
@@ -562,10 +629,21 @@ $('copyAllBtn').addEventListener('click', () => {
 
 $('exportBtn').addEventListener('click', exportPng);
 
+// ── Harmony tabs (delegated) ──────────────────────────────────────
+harmonyTabs.addEventListener('click', e => {
+  const tab = e.target.closest('.harmony-tab');
+  if (!tab) return;
+  // Allow re-clicking Random to re-roll; skip re-render for all other same-tab clicks
+  if (tab.dataset.mode === state.harmonyMode && tab.dataset.mode !== 'random') return;
+  state.harmonyMode = tab.dataset.mode;
+  renderHarmonyTabs();
+  recomputeHarmonies();
+});
+
 // ── Example photos (delegated) ────────────────────────────────────
 examplePhotos.addEventListener('click', e => {
   const btn = e.target.closest('.example-thumb');
-  if (btn && !e.target.closest('a')) handleUrl(btn.dataset.url);
+  if (btn && !e.target.closest('a')) handleUrl(btn.dataset.url, btn.dataset.alt);
 });
 
 // ── Swatch grid (delegated) ───────────────────────────────────────

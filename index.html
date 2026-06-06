@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>palette.</title>
+  <title>palette. — color palette generator</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&family=Playfair+Display:ital,wght@1,700&display=swap" rel="stylesheet">
@@ -12,15 +12,15 @@
 <body>
 
   <header class="site-header">
-    <span class="logo">palette.</span>
+    <h1 class="logo">palette.</h1>
     <span class="tagline">color theory from any image</span>
   </header>
 
   <main class="main">
 
     <!-- ── Upload state ───────────────────────────────────────────── -->
-    <section class="upload-section" id="uploadSection">
-      <div class="drop-zone" id="dropZone">
+    <section class="upload-section" id="uploadSection" aria-label="Upload">
+      <div class="drop-zone" id="dropZone" aria-label="Drop zone — drag an image here or use the buttons below">
         <div class="drop-zone__inner">
 
           <svg class="drop-zone__icon" viewBox="0 0 24 24" fill="none"
@@ -62,7 +62,7 @@
     </section>
 
     <!-- ── Results state ──────────────────────────────────────────── -->
-    <section class="results-section" id="resultsSection" hidden aria-live="polite">
+    <section class="results-section" id="resultsSection" hidden aria-label="Results">
 
       <div class="results-header">
         <div class="results-thumb">
@@ -71,7 +71,7 @@
 
         <div class="results-meta">
           <p class="results-eyebrow">Generated palette</p>
-          <h2 class="palette-name" id="paletteName">—</h2>
+          <h2 class="palette-name" id="paletteName" aria-live="polite" aria-atomic="true">—</h2>
         </div>
 
         <div class="results-actions">
@@ -80,6 +80,9 @@
           <button class="btn btn--ghost" id="exportBtn">Export PNG</button>
         </div>
       </div>
+
+      <!-- Harmony mode tabs — rendered by app.js -->
+      <div class="harmony-tabs" id="harmonyTabs" role="tablist" aria-label="Harmony mode"></div>
 
       <!-- 6 swatches injected here by app.js -->
       <div class="swatches-grid" id="swatchesGrid" role="list" aria-label="Color palette"></div>
