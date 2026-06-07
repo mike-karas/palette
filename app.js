@@ -11,7 +11,7 @@ const state = {
   dominantSlots:  null,   // ['Vibrant', …]   — which Vibrant slot each came from
   harmonies:      null,   // [hex, hex, hex]  — derived via color theory
   harmonyLabels:  null,   // ['Complementary', …]
-  harmonyMode:    'auto', // 'auto' | harmony label string
+  harmonyMode:    'random', // 'random' | harmony label string
   locked:         new Set(), // swatch indices 0-5 that are locked
   busy:           false,
 };
@@ -34,8 +34,51 @@ const harmonyTabs    = $('harmonyTabs');
 // ═══════════════════════════════════════════════════════════════════
 const UNSPLASH_KEY    = 'hAfQQhHlGMO1RCZIQ3aPLQNyMkUgBkJqAmylQSgqKM8';
 const EXAMPLE_TOPICS  = ['landscape', 'city', 'botanical', 'ocean', 'architecture', 'forest'];
+const EXAMPLES_CACHE_KEY = 'palette_examples_v1';
+
+// Escape user-supplied strings before inserting into innerHTML
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+function renderExamplePhotos(photos) {
+  examplePhotos.innerHTML = `
+    <p class="examples__heading">Or try an example</p>
+    <div class="examples__grid">
+      ${photos.map(p => {
+        const alt    = esc(p.alt_description || `Photo by ${p.user.name} on Unsplash`);
+        const name   = esc(p.user.name);
+        const href   = esc(p.user.links.html);
+        const imgUrl = esc(p.urls.small);
+        const url    = esc(p.urls.regular);
+        return `
+          <button class="example-thumb" data-url="${url}"
+                  data-alt="${alt}"
+                  aria-label="Load example: ${alt}">
+            <img src="${imgUrl}" alt="${alt}" loading="lazy">
+            <span class="example-thumb__attr">
+              Photo by <a href="${href}?utm_source=palette&amp;utm_medium=referral" target="_blank" rel="noopener">${name}</a>
+              on <a href="https://unsplash.com?utm_source=palette&amp;utm_medium=referral" target="_blank" rel="noopener">Unsplash</a>
+            </span>
+          </button>`;
+      }).join('')}
+    </div>`;
+  examplePhotos.hidden = false;
+}
 
 async function fetchExamples() {
+  // Show skeleton placeholders immediately so layout doesn't shift on load
+  examplePhotos.innerHTML = `
+    <p class="examples__heading">Or try an example</p>
+    <div class="examples__grid">
+      ${Array(6).fill('<div class="example-thumb example-thumb--skeleton" aria-hidden="true"></div>').join('')}
+    </div>`;
+  examplePhotos.hidden = false;
+
+  // Serve from sessionStorage cache to avoid burning API quota on every refresh
+  try {
+    const cached = sessionStorage.getItem(EXAMPLES_CACHE_KEY);
+    if (cached) { renderExamplePhotos(JSON.parse(cached)); return; }
+  } catch { /* sessionStorage unavailable — proceed with fetch */ }
+
   try {
     const results = await Promise.all(
       EXAMPLE_TOPICS.map(topic =>
@@ -46,34 +89,17 @@ async function fetchExamples() {
     );
 
     const photos = results.filter(Boolean);
-    if (!photos.length) {
-      examplePhotos.hidden = true;
-      return;
-    }
+    if (!photos.length) { examplePhotos.hidden = true; return; }
 
-    examplePhotos.innerHTML = `
-      <p class="examples__heading">Or try an example</p>
-      <div class="examples__grid">
-        ${photos.map(p => `
-          <button class="example-thumb" data-url="${p.urls.regular}"
-                  data-alt="${p.alt_description || `Photo by ${p.user.name} on Unsplash`}"
-                  aria-label="Load example: ${p.alt_description || `photo by ${p.user.name}`}">
-            <img src="${p.urls.small}" alt="${p.alt_description || `Photo by ${p.user.name}`}" loading="lazy">
-            <span class="example-thumb__attr">
-              Photo by <a href="${p.user.links.html}?utm_source=palette&utm_medium=referral" target="_blank" rel="noopener">${p.user.name}</a>
-              on <a href="https://unsplash.com?utm_source=palette&utm_medium=referral" target="_blank" rel="noopener">Unsplash</a>
-            </span>
-          </button>
-        `).join('')}
-      </div>`;
-
-    examplePhotos.hidden = false;
+    try { sessionStorage.setItem(EXAMPLES_CACHE_KEY, JSON.stringify(photos)); } catch { /* quota exceeded */ }
+    renderExamplePhotos(photos);
   } catch {
     examplePhotos.hidden = true;
   }
 }
 
 async function handleUrl(url, altText = 'Source image from Unsplash') {
+  if (state.busy) return;
   const img = new Image();
   img.crossOrigin = 'anonymous';
   img.onload = () => {
@@ -189,6 +215,11 @@ function minPairwiseDist(hexes) {
 // full 6-color palette by its minimum pairwise CIELAB distance — this
 // is the "maximin" criterion, guaranteeing the palette we pick has
 // the greatest separation between its most similar pair of colors.
+//
+// NOTE: assignHarmonies() is currently unused — Random mode replaced
+// the Auto default. Kept here for potential future reinstatement.
+// TAB_OPTIONS (below) shares the same label strings as join keys —
+// keep both arrays in sync if adding or renaming harmony types.
 // ═══════════════════════════════════════════════════════════════════
 const HARMONIES = [
   { label: 'Complementary',       fn: (h, ex) => complementary(h)         },
@@ -339,7 +370,7 @@ function recomputeHarmonies() {
 
   if (state.harmonyMode === 'random') {
     const pool = [...state.dominants];
-    const picks = state.dominants.map((dom, idx) => {
+    const picks = state.dominants.map((dom) => {
       const entry = HARMONIES[Math.floor(Math.random() * HARMONIES.length)];
       const color = entry.fn(dom, pool);
       pool.push(color);
@@ -559,8 +590,18 @@ function exportPng() {
     ctx.font      = '400 11px sans-serif';
     ctx.fillText(
       i < 3 ? `Dominant ${i + 1}` : `Harmony ${i - 2}`,
-      x + SWATCH_W / 2, SWATCH_H + 46
+      x + SWATCH_W / 2, SWATCH_H + 44
     );
+
+    // Harmony type sublabel (e.g. "Triadic") for harmony swatches
+    if (i >= 3) {
+      ctx.fillStyle = '#48484f';
+      ctx.font      = '400 10px sans-serif';
+      ctx.fillText(
+        state.harmonyLabels[i - 3] ?? '',
+        x + SWATCH_W / 2, SWATCH_H + 58
+      );
+    }
   });
 
   // Palette name — bottom-left
@@ -608,6 +649,7 @@ dropZone.addEventListener('drop', e => {
 
 // ── Results header ────────────────────────────────────────────────
 $('newImageBtn').addEventListener('click', () => {
+  state.locked.clear();
   resultsSection.classList.remove('is-visible');
   resultsSection.addEventListener('transitionend', () => {
     resultsSection.hidden = true;
@@ -662,11 +704,19 @@ swatchesGrid.addEventListener('click', e => {
     return;
   }
 
-  // Lock / unlock
+  // Lock / unlock — surgical update, no full re-render
   const lockBtn = e.target.closest('[data-action="lock"]');
   if (lockBtn) {
-    const idx = parseInt(lockBtn.dataset.index, 10);
-    state.locked.has(idx) ? state.locked.delete(idx) : state.locked.add(idx);
-    renderSwatches();
+    const idx      = parseInt(lockBtn.dataset.index, 10);
+    const isLocked = !state.locked.has(idx);
+    isLocked ? state.locked.add(idx) : state.locked.delete(idx);
+
+    const swatch = lockBtn.closest('.swatch');
+    const hex    = swatch.querySelector('.swatch__hex').textContent.trim();
+    swatch.classList.toggle('is-locked', isLocked);
+    lockBtn.setAttribute('aria-pressed', isLocked);
+    lockBtn.setAttribute('aria-label', `${isLocked ? 'Unlock' : 'Lock'} color ${hex}`);
+    lockBtn.setAttribute('title', isLocked ? 'Unlock' : 'Lock');
+    lockBtn.innerHTML = isLocked ? ICON_LOCKED : ICON_UNLOCKED;
   }
 });

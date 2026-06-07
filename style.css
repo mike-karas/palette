@@ -473,6 +473,28 @@ body {
   text-underline-offset: 2px;
 }
 
+.example-thumb--skeleton {
+  cursor: default;
+  pointer-events: none;
+  overflow: hidden;
+}
+.example-thumb--skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255,255,255,0.05) 50%,
+    transparent 100%
+  );
+  animation: skeleton-shimmer 1.4s infinite;
+}
+@keyframes skeleton-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
 /* ─── Responsive ─────────────────────────────────────────────────── */
 @media (max-width: 1024px) {
   .examples__grid { grid-template-columns: repeat(3, 1fr); }
