@@ -33,7 +33,8 @@ const harmonyTabs    = $('harmonyTabs');
 // UNSPLASH EXAMPLES
 // ═══════════════════════════════════════════════════════════════════
 const UNSPLASH_KEY    = 'hAfQQhHlGMO1RCZIQ3aPLQNyMkUgBkJqAmylQSgqKM8';
-const EXAMPLE_TOPICS  = ['landscape', 'city', 'botanical', 'ocean', 'architecture', 'forest'];
+// Unsplash topic slugs — one random request draws across all of them
+const EXAMPLE_TOPICS  = ['nature', 'travel', 'architecture-interior', 'textures-patterns', 'wallpapers'];
 const EXAMPLES_CACHE_KEY = 'palette_examples_v1';
 
 // Escape user-supplied strings before inserting into innerHTML
@@ -80,16 +81,14 @@ async function fetchExamples() {
   } catch { /* sessionStorage unavailable — proceed with fetch */ }
 
   try {
-    const results = await Promise.all(
-      EXAMPLE_TOPICS.map(topic =>
-        fetch(`https://api.unsplash.com/photos/random?query=${topic}&orientation=landscape&client_id=${UNSPLASH_KEY}`)
-          .then(r => r.ok ? r.json() : null)
-          .catch(() => null)
-      )
+    // A single request with count=6 instead of six one-photo requests: the
+    // demo-tier key allows 50 requests/hour and each call counts once.
+    const res = await fetch(
+      `https://api.unsplash.com/photos/random?count=6&orientation=landscape` +
+      `&topics=${EXAMPLE_TOPICS.join(',')}&client_id=${UNSPLASH_KEY}`
     );
-
-    const photos = results.filter(Boolean);
-    if (!photos.length) { examplePhotos.hidden = true; return; }
+    const photos = res.ok ? await res.json() : [];
+    if (!Array.isArray(photos) || !photos.length) { examplePhotos.hidden = true; return; }
 
     try { sessionStorage.setItem(EXAMPLES_CACHE_KEY, JSON.stringify(photos)); } catch { /* quota exceeded */ }
     renderExamplePhotos(photos);
